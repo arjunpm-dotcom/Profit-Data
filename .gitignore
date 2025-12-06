@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Data
+raw_data.csv
+*.csv
+*.xlsx
+*.xls
+
+# Backups
+*.zip
+*.rar
+*.7z
+
+# System
+.DS_Store
+Thumbs.db
