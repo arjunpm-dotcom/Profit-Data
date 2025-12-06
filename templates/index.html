@@ -1,0 +1,457 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Business Intelligence Dashboard</title>
+    <meta name="description" content="Advanced Business Intelligence Dashboard with real-time analytics">
+
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap"
+        rel="stylesheet">
+
+    <!-- Font Awesome Icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+
+    <!-- Plotly.js for Charts -->
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+
+    <!-- jQuery -->
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+
+    <!-- Select2 for Multi-Select -->
+    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
+    <!-- Leaflet.js for Maps -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- Custom Styles -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+
+<body>
+    <!-- ========== LOADING OVERLAY ========== -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="loading-content">
+            <div class="loading-logo"><i class="fas fa-chart-line"></i></div>
+            <div class="loading-spinner"></div>
+            <h2 id="loadingTitle">Loading Dashboard...</h2>
+            <p id="loadingMessage">Preparing your business intelligence experience</p>
+            <div class="loading-progress">
+                <div class="loading-progress-bar" id="progressBar"></div>
+            </div>
+            <p class="loading-tip" id="loadingTip"><i class="fas fa-lightbulb"></i> Processing 8 lakh records...</p>
+        </div>
+    </div>
+
+    <!-- ========== MAIN CONTAINER ========== -->
+    <div class="container" id="mainContainer">
+        <!-- Header -->
+        <header class="main-header">
+            <div class="header-content">
+                <h1><i class="fas fa-chart-pie"></i> BUSINESS INTELLIGENCE DASHBOARD</h1>
+                <p>Advanced Analytics &bull; Multi-Select Filters &bull; Complete Visualization</p>
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-primary" id="refreshBtn" onclick="loadData(true)"><i class="fas fa-sync-alt"></i>
+                    Refresh Data</button>
+                <button class="btn btn-success" id="exportBtn" onclick="exportData()"><i class="fas fa-download"></i>
+                    Export CSV</button>
+            </div>
+        </header>
+
+        <!-- Dashboard Layout -->
+        <div class="dashboard-layout">
+            <!-- ========== SIDEBAR ========== -->
+            <aside class="sidebar" id="sidebar">
+                <div class="sidebar-header">
+                    <h3><i class="fas fa-sliders-h"></i> DASHBOARD CONTROLS</h3>
+                    <button class="btn btn-danger btn-sm" onclick="resetFilters()"><i class="fas fa-redo"></i> Reset
+                        All</button>
+                </div>
+
+                <!-- Analysis Mode Toggle -->
+                <div class="mode-toggle">
+                    <button id="singleModeBtn" class="active" onclick="setMode('single')"><i
+                            class="fas fa-chart-line"></i> Analytics</button>
+                    <button id="comparisonModeBtn" onclick="setMode('comparison')"><i class="fas fa-balance-scale"></i>
+                        Compare</button>
+                </div>
+
+                <!-- ========== SINGLE MODE FILTERS ========== -->
+                <div id="singleFilters">
+                    <!-- Time Period -->
+                    <div class="filter-group">
+                        <h4><i class="fas fa-calendar-alt"></i> Time Period</h4>
+                        <label>Period Type</label>
+                        <select id="periodType">
+                            <option value="">All Time</option>
+                            <option value="year">Calendar Year</option>
+                            <option value="fy">Financial Year</option>
+                            <option value="quarter">Quarter</option>
+                        </select>
+
+                        <div id="yearSelect" class="hidden">
+                            <label>Year</label>
+                            <select id="year"></select>
+                        </div>
+
+                        <div id="fySelect" class="hidden">
+                            <label>Financial Year</label>
+                            <select id="fy"></select>
+                        </div>
+
+                        <div id="quarterSelect" class="hidden">
+                            <label>Quarter</label>
+                            <select id="quarter"></select>
+                        </div>
+                    </div>
+
+                    <!-- Location Filters -->
+                    <div class="filter-group">
+                        <h4><i class="fas fa-globe-asia"></i> Location Filters</h4>
+                        <label>States</label>
+                        <select id="states" class="multi-select" multiple></select>
+
+                        <label>Districts</label>
+                        <select id="districts" class="multi-select" multiple></select>
+                    </div>
+
+                    <!-- Hierarchy Filters -->
+                    <div class="filter-group">
+                        <h4><i class="fas fa-sitemap"></i> Hierarchy Filters</h4>
+                        <label>RBM</label>
+                        <select id="rbms" class="multi-select" multiple></select>
+
+                        <label>BDM</label>
+                        <select id="bdms" class="multi-select" multiple></select>
+
+                        <label>Branch</label>
+                        <select id="branches" class="multi-select" multiple></select>
+                    </div>
+
+                    <!-- Product Filters -->
+                    <div class="filter-group">
+                        <h4><i class="fas fa-tags"></i> Product Filters</h4>
+                        <label>Brand</label>
+                        <select id="brands" class="multi-select" multiple></select>
+                    </div>
+                </div>
+
+                <!-- ========== COMPARISON MODE FILTERS ========== -->
+                <div id="comparisonFilters" class="hidden">
+                    <div class="filter-group">
+                        <h4><i class="fas fa-chart-bar"></i> Comparison Settings</h4>
+                        <label>Comparison Type</label>
+                        <select id="comparisonType">
+                            <option value="year">Year vs Year</option>
+                            <option value="fy">FY vs FY</option>
+                            <option value="quarter">Quarter vs Quarter</option>
+                        </select>
+
+                        <label>Period 1 (Baseline)</label>
+                        <select id="period1"></select>
+
+                        <label>Period 2 (Compare)</label>
+                        <select id="period2"></select>
+
+                        <label>Compare By</label>
+                        <select id="comparisonDimension">
+                            <option value="Overall">Overall</option>
+                            <option value="RBM">RBM</option>
+                            <option value="BDM">BDM</option>
+                            <option value="State">State</option>
+                            <option value="District">District</option>
+                            <option value="Brand">Brand</option>
+                            <option value="Branch">Branch</option>
+                        </select>
+                    </div>
+
+                    <div class="filter-group">
+                        <h4><i class="fas fa-filter"></i> Additional Filters</h4>
+                        <label>RBMs</label>
+                        <select id="compRbms" class="multi-select" multiple></select>
+
+                        <label>States</label>
+                        <select id="compStates" class="multi-select" multiple></select>
+
+                        <label>Brands</label>
+                        <select id="compBrands" class="multi-select" multiple></select>
+
+                        <label>Branches</label>
+                        <select id="compBranches" class="multi-select" multiple></select>
+                    </div>
+                </div>
+
+                <!-- Data Summary -->
+                <div class="data-summary" id="dataSummary">
+                    <h4><i class="fas fa-database"></i> DATA SUMMARY</h4>
+                    <div class="summary-item">
+                        <span>Records:</span>
+                        <strong id="totalRecords">0</strong>
+                    </div>
+                    <div class="summary-item">
+                        <span>Revenue:</span>
+                        <strong id="totalRevenue">Rs.0</strong>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- ========== MAIN CONTENT ========== -->
+            <main class="main-content">
+                <!-- Welcome Screen -->
+                <div id="welcomeScreen" class="welcome-screen">
+                    <div class="welcome-icon"><i class="fas fa-chart-pie"></i></div>
+                    <h2>Welcome to Business Intelligence Dashboard</h2>
+                    <p>Your advanced analytics platform with complete visualization</p>
+
+                    <div class="features">
+                        <div class="feature">
+                            <h4><i class="fas fa-filter"></i> Multi-Select Filters</h4>
+                            <p>Filter by States, Districts, RBMs, BDMs, Branches, Brands</p>
+                        </div>
+                        <div class="feature">
+                            <h4><i class="fas fa-chart-area"></i> Complete Visualization</h4>
+                            <p>Monthly Trends, Hierarchy, Geographic, Product, RBM charts</p>
+                        </div>
+                        <div class="feature">
+                            <h4><i class="fas fa-balance-scale"></i> Comparison Mode</h4>
+                            <p>Year vs Year, FY vs FY, Quarter comparisons</p>
+                        </div>
+                        <div class="feature">
+                            <h4><i class="fas fa-bolt"></i> Fast Performance</h4>
+                            <p>Local caching for instant data loading</p>
+                        </div>
+                    </div>
+
+                    <div id="loadingStatus">
+                        <div class="loader-spinner"></div>
+                        <p>Loading data automatically...</p>
+                    </div>
+                </div>
+
+                <!-- ========== DASHBOARD CONTENT ========== -->
+                <div id="dashboardContent" class="hidden">
+                    <!-- Status Bar -->
+                    <div class="status-bar">
+                        <span class="badge" id="periodBadge">All Time</span>
+                        <span class="badge success" id="recordsBadge">0 Records</span>
+                        <span class="filter-info" id="activeFilters">All Data</span>
+                        <div class="filter-loading-indicator hidden" id="filterLoadingIndicator">
+                            <i class="fas fa-spinner fa-spin"></i> Updating...
+                        </div>
+                    </div>
+
+                    <!-- ========== AI INSIGHTS SECTION ========== -->
+                    <section class="insights-section" id="insightsSection">
+                        <div class="insights-header">
+                            <h3><i class="fas fa-brain"></i> AI-Powered Insights</h3>
+                            <button class="btn btn-sm btn-primary" onclick="refreshInsights()">
+                                <i class="fas fa-sync-alt"></i> Refresh
+                            </button>
+                        </div>
+                        <div class="insights-grid" id="insightsGrid">
+                            <div class="insight-card positive">
+                                <div class="insight-icon"><i class="fas fa-trophy"></i></div>
+                                <div class="insight-content">
+                                    <span class="insight-title">Top Performer</span>
+                                    <span class="insight-text" id="insightTopPerformer">Loading...</span>
+                                </div>
+                            </div>
+                            <div class="insight-card trend">
+                                <div class="insight-icon"><i class="fas fa-chart-line"></i></div>
+                                <div class="insight-content">
+                                    <span class="insight-title">Growth Trend</span>
+                                    <span class="insight-text" id="insightGrowth">Loading...</span>
+                                </div>
+                            </div>
+                            <div class="insight-card highlight">
+                                <div class="insight-icon"><i class="fas fa-star"></i></div>
+                                <div class="insight-content">
+                                    <span class="insight-title">Highlight</span>
+                                    <span class="insight-text" id="insightHighlight">Loading...</span>
+                                </div>
+                            </div>
+                            <div class="insight-card alert">
+                                <div class="insight-icon"><i class="fas fa-exclamation-triangle"></i></div>
+                                <div class="insight-content">
+                                    <span class="insight-title">Attention Needed</span>
+                                    <span class="insight-text" id="insightAlert">Loading...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- ========== SINGLE VIEW ========== -->
+                    <div id="singleView">
+                        <!-- KPI Cards -->
+                        <section class="kpi-section">
+                            <div class="kpi-grid">
+                                <div class="kpi-card revenue">
+                                    <div class="kpi-icon"><i class="fas fa-rupee-sign"></i></div>
+                                    <div class="kpi-info">
+                                        <span class="kpi-value" id="kpiRevenue">Rs.0</span>
+                                        <span class="kpi-label">GROSS REVENUE</span>
+                                    </div>
+                                </div>
+                                <div class="kpi-card profit">
+                                    <div class="kpi-icon"><i class="fas fa-trending-up"></i></div>
+                                    <div class="kpi-info">
+                                        <span class="kpi-value" id="kpiProfit">Rs.0</span>
+                                        <span class="kpi-label">NET PROFIT</span>
+                                        <span class="kpi-change positive" id="kpiProfitChange"></span>
+                                    </div>
+                                </div>
+                                <div class="kpi-card quantity">
+                                    <div class="kpi-icon"><i class="fas fa-boxes"></i></div>
+                                    <div class="kpi-info">
+                                        <span class="kpi-value" id="kpiQuantity">0</span>
+                                        <span class="kpi-label">QUANTITY SOLD</span>
+                                    </div>
+                                </div>
+                                <div class="kpi-card margin">
+                                    <div class="kpi-icon"><i class="fas fa-percentage"></i></div>
+                                    <div class="kpi-info">
+                                        <span class="kpi-value" id="kpiMargin">0%</span>
+                                        <span class="kpi-label">PROFIT MARGIN</span>
+                                        <span class="kpi-change" id="kpiMarginStatus"></span>
+                                    </div>
+                                </div>
+                                <div class="kpi-card discount">
+                                    <div class="kpi-icon"><i class="fas fa-ticket-alt"></i></div>
+                                    <div class="kpi-info">
+                                        <span class="kpi-value" id="kpiDiscount">0%</span>
+                                        <span class="kpi-label">DISCOUNT %</span>
+                                        <span class="kpi-change" id="kpiDiscountAmount"></span>
+                                    </div>
+                                </div>
+                                <div class="kpi-card stores">
+                                    <div class="kpi-icon"><i class="fas fa-store"></i></div>
+                                    <div class="kpi-info">
+                                        <span class="kpi-value" id="kpiCounts">0 / 0 / 0</span>
+                                        <span class="kpi-label">STATES / DISTRICTS / STORES</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Charts Section -->
+                        <section class="chart-section">
+                            <div class="chart-tabs">
+                                <button class="chart-tab active" onclick="showChart('monthly')"><i
+                                        class="fas fa-calendar"></i> Monthly Trends</button>
+                                <button class="chart-tab" onclick="showChart('hierarchy')"><i
+                                        class="fas fa-sitemap"></i> Hierarchy View</button>
+                                <button class="chart-tab" onclick="showChart('geographic')"><i class="fas fa-globe"></i>
+                                    Geographic View</button>
+                                <button class="chart-tab" onclick="showChart('map')"><i
+                                        class="fas fa-map-marked-alt"></i> India Map</button>
+                                <button class="chart-tab" onclick="showChart('product')"><i class="fas fa-tag"></i>
+                                    Product Analysis</button>
+                                <button class="chart-tab" onclick="showChart('rbm')"><i class="fas fa-user-tie"></i> RBM
+                                    Performance</button>
+                            </div>
+                            <div class="chart-container">
+                                <div id="chartLoading" class="loader hidden">
+                                    <div class="loader-spinner"></div>
+                                    <p>Loading chart...</p>
+                                </div>
+                                <div id="chartDisplay"></div>
+                                <div id="mapContainer" class="hidden" style="height: 450px;"></div>
+                            </div>
+                        </section>
+
+                        <!-- Data Table -->
+                        <section class="table-section">
+                            <div class="table-header">
+                                <h3><i class="fas fa-table"></i> Data Explorer</h3>
+                                <span id="tableCount">Showing 100 records</span>
+                            </div>
+                            <div class="table-container">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>RBM</th>
+                                            <th>BDM</th>
+                                            <th>Branch</th>
+                                            <th>State</th>
+                                            <th>District</th>
+                                            <th>Brand</th>
+                                            <th>Product</th>
+                                            <th>QTY</th>
+                                            <th>Revenue</th>
+                                            <th>Profit</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="dataTableBody">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </section>
+                    </div>
+
+                    <!-- ========== COMPARISON VIEW ========== -->
+                    <div id="comparisonView" class="hidden">
+                        <!-- Comparison Header -->
+                        <div class="comparison-header">
+                            <span class="badge">COMPARISON MODE</span>
+                            <h2 id="comparisonTitle">2023 vs 2024</h2>
+                            <p id="comparisonSubtitle">Year-over-Year Comparison | Overall</p>
+                        </div>
+
+                        <!-- Comparison KPIs -->
+                        <div class="comparison-grid" id="comparisonKpis">
+                            <!-- Populated by JS -->
+                        </div>
+
+                        <!-- Comparison Chart -->
+                        <section class="chart-section">
+                            <div class="chart-container">
+                                <div id="comparisonChartDisplay"></div>
+                            </div>
+                        </section>
+
+                        <!-- Comparison Table -->
+                        <section class="table-section">
+                            <div class="table-header">
+                                <h3><i class="fas fa-table"></i> Detailed Comparison</h3>
+                            </div>
+                            <div class="table-container">
+                                <table class="data-table comparison-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Dimension</th>
+                                            <th>Period 1</th>
+                                            <th>Period 2</th>
+                                            <th>Growth %</th>
+                                            <th>Trend</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="comparisonTableBody">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <h3><i class="fas fa-chart-pie"></i> BUSINESS INTELLIGENCE DASHBOARD</h3>
+            <p>Multi-Select Filters &bull; Complete Visualization &bull; Advanced Analytics</p>
+            <p class="version">&copy; 2024 Enterprise BI Suite &bull; Version 6.0 &bull; Flask Edition</p>
+        </footer>
+    </div>
+
+    <!-- Custom JavaScript -->
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+
+</html>
