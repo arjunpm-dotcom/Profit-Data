@@ -6,7 +6,7 @@ venv/
 .env
 
 # Data
-raw_data.csv
+# raw_data.csv
 *.csv
 *.xlsx
 *.xls
