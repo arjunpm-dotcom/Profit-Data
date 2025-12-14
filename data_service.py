@@ -6,15 +6,18 @@ Optimized for large datasets (1-5 lakh rows)
 
 import pandas as pd
 import numpy as np
-from datetime import datetime
-import hashlib
+import threading
+import time
+from datetime import datetime, timedelta
+import config
+from config import SUPABASE_URL, SUPABASE_KEY, SUPABASE_TABLE
+import requests
 import json
-from config import BRANCH_RBM_BDM_MAPPING, BRANCH_DISTRICT_MAPPING, DISTRICT_STATE_MAPPING, SUPABASE_URL, SUPABASE_KEY, SUPABASE_TABLE
 
 # Cache for data
-_cached_data = None
+_cached_data = pd.DataFrame()
 _cache_time = None
-CACHE_TTL = 600  # 10 minutes
+CACHE_DURATION = 3600  # 1 hour cache
 
 # Filter result cache (for fast repeated queries)
 _filter_cache = {}
@@ -25,6 +28,14 @@ import os
 LOCAL_CACHE_FILE = os.path.join(os.path.dirname(__file__), 'data_cache.csv')
 PROCESSED_CACHE_FILE = os.path.join(os.path.dirname(__file__), 'data_processed.pkl')
 LOCAL_RAW_CSV = os.path.join(os.path.dirname(__file__), 'raw_data.csv')
+
+# Supabase RPC Config
+RPC_URL = f"{SUPABASE_URL}/rest/v1/rpc"
+RPC_HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json"
+}
 
 # Kerala district coordinates for map
 KERALA_DISTRICT_COORDS = {
@@ -61,9 +72,6 @@ def format_indian_currency(value):
     elif abs_value >= 100000:  # 1 Lakh
         formatted = f"{abs_value/100000:,.2f}"
         return f"{sign}Rs.{formatted} Lakh"
-    elif abs_value >= 1000:  # 1 Thousand
-        formatted = f"{abs_value/1000:,.2f}"
-        return f"{sign}Rs.{formatted} K"
     else:
         return f"{sign}Rs.{abs_value:,.2f}"
 
@@ -665,9 +673,28 @@ def get_geographic_data(df):
 _result_cache = {}
 _result_cache_max_size = 100
 
-def get_dashboard_data(filters):
-    """Get ALL dashboard data with result caching"""
+def fetch_rpc(function_name, params=None):
+    """Execute a Supabase RPC function"""
+    try:
+        url = f"{RPC_URL}/{function_name}"
+        response = requests.post(url, headers=RPC_HEADERS, json=params or {}, timeout=10)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            print(f"[ERROR] RPC {function_name} failed: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        print(f"[ERROR] RPC Exception: {str(e)}")
+        return None
+
+def get_dashboard_data(filters=None):
+    """
+    Get ALL dashboard data with result caching.
+    Optimized: Uses Supabase RPC for initial load/simple filters.
+    Fallbacks to Pandas for complex filters (arrays).
+    """
     global _result_cache
+    filters = filters or {}
     
     # Generate hash for these filters
     filter_hash = get_filter_hash(filters)
@@ -676,6 +703,124 @@ def get_dashboard_data(filters):
     if filter_hash in _result_cache:
         print(f"[CACHE] Serving dashboard data from cache ({filter_hash[:8]})")
         return _result_cache[filter_hash]
+
+    # Check if we can use RPC (Simple filters only)
+    # If any filter is a list with > 1 item, use Pandas (Slow but supports arrays)
+    use_rpc = True
+    rpc_params = {}
+    
+    complex_keys = ['states', 'branches', 'brands', 'districts', 'rbms', 'bdms']
+    for key in complex_keys:
+        val = filters.get(key)
+        if val and isinstance(val, list) and len(val) > 1:
+            use_rpc = False
+            break
+        elif val and isinstance(val, list) and len(val) == 1:
+            # Single item list -> Convert to string for RPC
+            # Note: Map 'states' -> 'filter_state' etc.
+            if key == 'states': rpc_params['filter_state'] = val[0]
+            elif key == 'branches': rpc_params['filter_branch'] = val[0]
+            elif key == 'brands': rpc_params['filter_brand'] = val[0]
+            elif key == 'districts': rpc_params['filter_district'] = val[0]
+            elif key == 'rbms': rpc_params['filter_rbm'] = val[0]
+            elif key == 'bdms': rpc_params['filter_bdm'] = val[0]
+        elif val and not isinstance(val, list): # Direct value (e.g., year)
+            if key == 'year': rpc_params['filter_year'] = int(val)
+
+    # For now, let's ONLY use RPC for Global Load (No filters) or minimal single selection
+    # to ensure stability.
+    if use_rpc:
+        # Map filters to RPC params
+        if filters.get('year'): rpc_params['filter_year'] = int(filters['year'])
+        
+        # Extract single values from lists if present
+        if filters.get('states') and len(filters['states']) == 1: 
+            rpc_params['filter_state'] = filters['states'][0]
+        if filters.get('branches') and len(filters['branches']) == 1:
+            rpc_params['filter_branch'] = filters['branches'][0]
+        if filters.get('brands') and len(filters['brands']) == 1:
+            rpc_params['filter_brand'] = filters['brands'][0]
+            
+        print(f"[PERFORMANCE] Using RPC for dashboard load with params: {rpc_params}")
+        
+        # Parallel Fetch (Pseudo-parallel using logic, strict parallel requires asyncio or threads)
+        # requests is blocking, but much faster than downloading 50MB CSV.
+        
+        kpis = fetch_rpc('get_dashboard_kpis', rpc_params)
+        trend = fetch_rpc('get_monthly_trend', rpc_params)
+        map_data_rpc = fetch_rpc('get_state_performance', {'filter_year': rpc_params.get('filter_year')}) # Map data is state-level
+        top_products = fetch_rpc('get_top_products', {'limit_count': 10})
+        
+        if kpis:
+            # Format RPC Response to match Frontend Expectations
+            formatted_kpis = {
+                'revenue': kpis.get('revenue', 0),
+                'revenue_formatted': format_indian_currency(kpis.get('revenue', 0)),
+                'profit': kpis.get('profit', 0),
+                'profit_formatted': format_indian_currency(kpis.get('profit', 0)),
+                'quantity': kpis.get('quantity', 0),
+                'quantity_formatted': format_indian_number(kpis.get('quantity', 0)),
+                'margin': kpis.get('margin', 0),
+                'discount': kpis.get('discount', 0),
+                'discount_pct': 0, # Calc if needed
+                'discount_formatted': format_indian_currency(kpis.get('discount', 0)),
+                'states': kpis.get('states', 0),
+                'districts': kpis.get('districts', 0),
+                'stores': kpis.get('stores', 0),
+                'brands': kpis.get('brands', 0),
+                'products': kpis.get('products', 0),
+                'records': kpis.get('records', 0)
+            }
+            
+            # Format Charts
+            charts = {
+                'monthly': {
+                    'labels': [x['label'] for x in trend] if trend else [],
+                    'revenue': [x['revenue']/10000000 for x in trend] if trend else [],
+                    'profit': [x['profit']/10000000 for x in trend] if trend else []
+                },
+                'product': {
+                    'labels': [x['product_name'] for x in top_products] if top_products else [],
+                    'profit': [x['profit']/100000 for x in top_products] if top_products else [],
+                    'revenue': [x['revenue']/10000000 for x in top_products] if top_products else [],
+                    'profit_margin': [x['profit_margin'] for x in top_products] if top_products else [],
+                    'quantity': [x['quantity'] for x in top_products] if top_products else []
+                },
+                'map': {
+                    'districts': [] # RPC returns stats by State, frontend expects districts. 
+                                    # Adapt or leave empty to force lazy load of map?
+                                    # Let's map State data to the map format
+                },
+                'geographic': {
+                    'states': {
+                        'labels': [x['name'] for x in map_data_rpc] if map_data_rpc else [],
+                        'revenue': [x['revenue']/10000000 for x in map_data_rpc] if map_data_rpc else [],
+                        'profit_margin': [x['margin'] for x in map_data_rpc] if map_data_rpc else [],
+                        'branches': [x['branches'] for x in map_data_rpc] if map_data_rpc else []
+                    },
+                    'districts': [] # RPC doesn't provide district-level breakdown yet
+                },
+                'hierarchy': None, # RPC doesn't provide hierarchy data yet
+                'rbm': None # RPC doesn't provide RBM data yet
+            }
+            
+            result = {
+                'success': True,
+                'kpis': formatted_kpis,
+                'charts': charts,
+                'insights': {}, # Skip AI for fast load
+                'table': {'data': [], 'total_records': kpis.get('records', 0)} # Skip table rows for speed
+            }
+
+            # Update cache
+            if len(_result_cache) >= _result_cache_max_size:
+                _result_cache.pop(next(iter(_result_cache)))
+            _result_cache[filter_hash] = result
+            
+            return result
+
+    # FALLBACK: Use Legacy Pandas Method
+    print("[PERFORMANCE] Falling back to Pandas Local Processing...")
     
     # Load and filter data
     df = load_data()
