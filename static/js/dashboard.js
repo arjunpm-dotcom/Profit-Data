@@ -37,7 +37,7 @@ $(document).ready(function () {
 
     // AUTO-LOAD DATA ON PAGE LOAD
     console.log('[DATA] Auto-loading data from Google Sheets...');
-    updateLoadingMessage('Connecting to Google Sheets...', 'Fetching 8 lakh records from spreadsheet...');
+    updateLoadingMessage('Connecting to Supabase...', 'Fetching records from database...');
     loadData();
 });
 
@@ -171,7 +171,7 @@ async function loadData(forceRefresh = false, retryCount = 0) {
     $('#refreshBtn').prop('disabled', true);
 
     const messages = [
-        { title: 'Connecting to Google Sheets...', tip: 'Fetching live data from spreadsheet...' },
+        { title: 'Connecting to Supabase...', tip: 'Fetching live data from database...' },
         { title: 'Loading Records...', tip: 'This takes ~1-2 minutes for 8 lakh records...' },
         { title: 'Processing Data...', tip: 'Preparing dashboard visualizations...' }
     ];
