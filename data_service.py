@@ -9,7 +9,7 @@ import numpy as np
 from datetime import datetime
 import hashlib
 import json
-from config import BRANCH_RBM_BDM_MAPPING, BRANCH_DISTRICT_MAPPING, DISTRICT_STATE_MAPPING, GOOGLE_SHEET_URL
+from config import BRANCH_RBM_BDM_MAPPING, BRANCH_DISTRICT_MAPPING, DISTRICT_STATE_MAPPING, SUPABASE_URL, SUPABASE_KEY, SUPABASE_TABLE
 
 # Cache for data
 _cached_data = None
@@ -172,69 +172,131 @@ def load_data(force_refresh=False):
             return _cached_data
     
     
-    # Fetch from Google Sheets (always use live data from spreadsheet)
+    # Fetch from Supabase using REST API (requests)
     try:
         import requests
-        from io import StringIO
         
-        print("[DATA] Fetching data from Google Sheets...")
-        print("[INFO] This may take a minute for 8 lakh records...")
+        print("[DATA] Fetching data from Supabase (REST API)...")
+        print(f"[INFO] Connecting to {SUPABASE_URL}...")
         
-        response = requests.get(GOOGLE_SHEET_URL, timeout=300)  # 5 min timeout for large data
-        response.raise_for_status()
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}"
+        }
         
-        df = pd.read_csv(StringIO(response.text), low_memory=False)
-        print(f"[DATA] Loaded {len(df):,} records from Google Sheets!")
+        # Base URL for the table
+        base_url = f"{SUPABASE_URL}/rest/v1/{SUPABASE_TABLE}?select=*"
+        
+        all_data = []
+        offset = 0
+        batch_size = 1000
+        
+        print("[DATA] Starting data fetch sequence...")
+        
+        while True:
+            # Add range header for pagination
+            # Range: bytes=0-9 (inclusive)
+            range_header = {"Range": f"{offset}-{offset + batch_size - 1}"}
+            
+            # Merge headers
+            req_headers = {**headers, **range_header}
+            
+            response = requests.get(base_url, headers=req_headers, timeout=60)
+            
+            if response.status_code != 200:
+                print(f"[ERROR] Failed to fetch data: {response.status_code} - {response.text}")
+                break
+                
+            rows = response.json()
+            
+            if not rows:
+                break
+                
+            all_data.extend(rows)
+            
+            if len(rows) < batch_size:
+                # We reached the end
+                break
+                
+            offset += batch_size
+            
+            # Print progress every 10k records
+            if len(all_data) % 10000 == 0:
+                print(f"[DATA] Fetched {len(all_data):,} records so far...")
+                
+        print(f"[DATA] Loaded {len(all_data):,} raw records from Supabase!")
+        
+        if not all_data:
+            return pd.DataFrame()
+            
+        df = pd.DataFrame(all_data)
         
         print("[PROCESS] Processing data...")
         df.columns = df.columns.str.strip()
         
         # Process date column
+        # Handle various date formats potentially coming from Supabase (often ISO string YYYY-MM-DD or similar)
         if 'Month' in df.columns:
-            df['Date'] = pd.to_datetime(df['Month'], format='%m/%d/%Y', errors='coerce')
+            df['Date'] = pd.to_datetime(df['Month'], errors='coerce')
+        elif 'date' in df.columns: # Common lowercase in DB
+             df['Date'] = pd.to_datetime(df['date'], errors='coerce')
+        elif 'Date' in df.columns:
+             df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+             
+        if 'Date' in df.columns:
             if df['Date'].isna().all():
-                df['Date'] = pd.to_datetime(df['Month'], errors='coerce')
-            
-            df = df.dropna(subset=['Date'])
-            df['Year'] = df['Date'].dt.year.astype(int)
-            df['Month_Num'] = df['Date'].dt.month.astype(int)
-            df['Month_Short'] = df['Date'].dt.strftime('%b')
-            df['Month_Full'] = df['Date'].dt.strftime('%B')
-            df['Month_Year'] = df['Date'].dt.strftime('%b %Y')
-            
-            # Financial Year Calculations - OPTIMIZED with vectorized operations
-            years = df['Date'].dt.year
-            months = df['Date'].dt.month
-            
-            # Vectorized financial year calculation
-            fy_start_year = np.where(months >= 4, years, years - 1)
-            fy_end_year_short = (fy_start_year + 1) % 100
-            # Convert numpy arrays to pandas Series before using .str accessor
-            fy_end_year_series = pd.Series(fy_end_year_short).astype(str).str.zfill(2)
-            df['Financial_Year'] = 'FY ' + pd.Series(fy_start_year).astype(str).values + '-' + fy_end_year_series.values
-            
-            # Vectorized quarter calculation
-            df['Quarter'] = 'Q' + (((months - 1) // 3) + 1).astype(str)
-            
-            # Vectorized financial quarter calculation
-            adjusted_month = np.where(months >= 4, months - 3, months + 9)
-            df['Financial_Quarter'] = 'FQ' + (((adjusted_month - 1) // 3) + 1).astype(str)
-            
-            df['FY_Label'] = df['Financial_Year']
+                 # Try other fallbacks if needed, or fail gracefully
+                 pass
+            else:
+                df = df.dropna(subset=['Date'])
+                df['Year'] = df['Date'].dt.year.astype(int)
+                df['Month_Num'] = df['Date'].dt.month.astype(int)
+                df['Month_Short'] = df['Date'].dt.strftime('%b')
+                df['Month_Full'] = df['Date'].dt.strftime('%B')
+                df['Month_Year'] = df['Date'].dt.strftime('%b %Y')
+                
+                # Financial Year Calculations - OPTIMIZED with vectorized operations
+                years = df['Date'].dt.year
+                months = df['Date'].dt.month
+                
+                # Vectorized financial year calculation
+                fy_start_year = np.where(months >= 4, years, years - 1)
+                fy_end_year_short = (fy_start_year + 1) % 100
+                
+                # Use Pandas Series for safe string concatenation
+                s_start = pd.Series(fy_start_year).astype(str)
+                s_end = pd.Series(fy_end_year_short).astype(str).str.zfill(2)
+                
+                df['Financial_Year'] = 'FY ' + s_start + '-' + s_end
+                
+                # Vectorized quarter calculation
+                df['Quarter'] = 'Q' + (((months - 1) // 3) + 1).astype(str)
+                
+                # Vectorized financial quarter calculation
+                adjusted_month = np.where(months >= 4, months - 3, months + 9)
+                # Use Pandas Series for safe string concatenation
+                df['Financial_Quarter'] = 'FQ' + pd.Series(((adjusted_month - 1) // 3) + 1).astype(str)
+                
+                df['FY_Label'] = df['Financial_Year']
         
         # Clean numeric columns
         numeric_cols = ['QTY', 'Taxable Value', 'Sold Price', 'Direct Discount', 'Profit']
         
         for col in df.columns:
             for possible_col in numeric_cols:
+                # Case insensitive match
                 if possible_col.lower() in col.lower():
                     try:
-                        df[col] = df[col].astype(str).str.replace(',', '')
-                        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(float)
+                        # Handle if it's already numeric (DB usually provides numbers)
+                        if pd.api.types.is_numeric_dtype(df[col]):
+                            df[col] = df[col].fillna(0).astype(float)
+                        else:
+                            df[col] = df[col].astype(str).str.replace(',', '')
+                            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(float)
                     except:
                         pass
         
-        # Rename columns
+        # Rename columns to match internal schema
         column_mapping = {}
         for col in df.columns:
             col_lower = col.lower()
@@ -274,11 +336,11 @@ def load_data(force_refresh=False):
         # Clear filter cache when new data is loaded
         _filter_cache.clear()
         
-        print(f"[SUCCESS] Loaded and cached {len(df):,} records from Google Sheets!")
+        print(f"[SUCCESS] Loaded and cached {len(df):,} records from Supabase!")
         return df
         
     except Exception as e:
-        print(f"[ERROR] Error loading data from Google Sheets: {str(e)}")
+        print(f"[ERROR] Error loading data from Supabase: {str(e)}")
         import traceback
         traceback.print_exc()
         return pd.DataFrame()

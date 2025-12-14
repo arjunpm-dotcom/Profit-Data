@@ -396,6 +396,16 @@ DISTRICT_STATE_MAPPING = {
     "Corporate": "Corporate"
 }
 
-# Google Sheets Configuration
 GOOGLE_SHEET_ID = "1x-jdXZaT_pBhXSE0gQhF5i2eYbbwH-F9f2PNVaX6Io4"
 GOOGLE_SHEET_URL = f"https://docs.google.com/spreadsheets/d/{GOOGLE_SHEET_ID}/export?format=csv"
+
+# Supabase Configuration
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Use environment variables if available, otherwise use provided defaults
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://pvnazfljrcvfbhhoaaz.supabase.co")
+SUPABASE_KEY = os.environ.get("SUPABASE_ANON_KEY", "ssb_publishable_-oWx8INajCxJfTbiK4UcQQ_8EttGoFI")
+SUPABASE_TABLE = os.environ.get("TABLE_NAME", "profit_data")
